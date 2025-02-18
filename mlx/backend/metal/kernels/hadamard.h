@@ -26,7 +26,7 @@ METAL_FUNC void radix_func(thread float* x) {
   }
 }
 
-template <typename T, int N, int max_radix, int read_width>
+template <typename T, int N, int max_radix, int read_width, int stride = 1>
 [[kernel]] void hadamard_n(
     const device T* in [[buffer(0)]],
     device T* out [[buffer(1)]],
@@ -46,18 +46,20 @@ template <typename T, int N, int max_radix, int read_width>
   constexpr short logFinal = logN % logR;
   constexpr short final_radix = 1 << (logFinal);
 
-  int batch_idx = elem.x * N;
-  short i = elem.y;
+  int batch_idx = elem.y * N * stride + elem.z;
+  short i = elem.x;
 
   threadgroup T buf[N];
 
   // Read values from device
-  STEEL_PRAGMA_UNROLL
-  for (short j = 0; j < max_radix / read_width; j++) {
-    short index = j * read_width * num_threads + i * read_width;
+  if (stride == 1) {
     STEEL_PRAGMA_UNROLL
-    for (short r = 0; r < read_width; r++) {
-      buf[index + r] = in[batch_idx + index + r];
+    for (short j = 0; j < max_radix / read_width; j++) {
+      short index = j * read_width * num_threads + i * read_width;
+      STEEL_PRAGMA_UNROLL
+      for (short r = 0; r < read_width; r++) {
+        buf[index + r] = in[batch_idx + index + r];
+      }
     }
   }
 
