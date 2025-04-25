@@ -58,8 +58,9 @@ std::string gen_hadamard_codelet(int m) {
   return source.str();
 }
 
-void hadamard_inplace(
-    array& x,
+void hadamard_mn_contiguous(
+    const array& x,
+    array& y,
     int m,
     int n,
     float scale,
@@ -111,15 +112,15 @@ void hadamard_inplace(
   auto kernel = d.get_kernel("n" + kname, lib);
   compute_encoder.set_compute_pipeline_state(kernel);
   compute_encoder.set_input_array(x, 0);
-  compute_encoder.set_output_array(x, 1);
+  compute_encoder.set_output_array(y, 1);
   compute_encoder.set_bytes(scale_n, 2);
   compute_encoder.dispatch_threads(grid_dims_n, group_dims_n);
 
   if (m > 1) {
     auto kernel = d.get_kernel("m" + kname, lib);
     compute_encoder.set_compute_pipeline_state(kernel);
-    compute_encoder.set_input_array(x, 0);
-    compute_encoder.set_output_array(x, 1);
+    compute_encoder.set_input_array(y, 0);
+    compute_encoder.set_output_array(y, 1);
     compute_encoder.set_bytes(scale_m, 2);
     compute_encoder.dispatch_threads(grid_dims_m, group_dims_m);
   }
@@ -138,14 +139,19 @@ void Hadamard::eval_gpu(const std::vector<array>& inputs, array& out) {
 
   // Case 1
   if (n * in.itemsize() <= MAX_HADAMARD_BYTES) {
-    copy_gpu(
-        in,
-        out,
-        in.flags().row_contiguous ? CopyType::Vector : CopyType::General,
-        s);
-    hadamard_inplace(out, m, n, scale_, d, s);
-    return;
+    if (in.flags().row_contiguous) {
+      if (in.is_donatable()) {
+        out.copy_shared_buffer(in);
+      } else {
+        out.set_data(allocator::malloc(out.nbytes()));
+      }
+      hadamard_mn_contiguous(in, out, m, n, scale_, d, s);
+    } else {
+      copy_gpu(in, out, CopyType::General, s);
+      hadamard_mn_contiguous(out, out, m, n, scale_, d, s);
+    }
   }
+  return;
 }
 
 } // namespace mlx::core
